@@ -1,0 +1,16 @@
+vm_ssh_port: 3333
+local_jenkins_port: 8081
+dev_image_ssh_port: 3334
+
+microservice:
+  name : myawsomeproject
+user:
+  name : ali
+  full_name: Ali Khan
+  default_password: password
+  email: ali@khudkar.io
+docker:
+  server: nexus.khudkar.io
+  port: 8082
+  user: ali
+  password: alikhan
