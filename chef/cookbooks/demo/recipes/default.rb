@@ -1,23 +1,23 @@
-service_name = node['demo']['service']['name']
-app_user = node['demo']['service']['user']
-app_group = node['demo']['service']['group']
-app_port = node['demo']['service']['port']
-repo_artifact_path=node['demo']['repo']
+service_name = node['{{artifactId}}']['service']['name']
+app_user = node['{{artifactId}}']['service']['user']
+app_group = node['{{artifactId}}']['service']['group']
+app_port = node['{{artifactId}}']['service']['port']
+repo_artifact_path=node['{{artifactId}}']['repo']
 
-artifact_name=node['demo']['artifact']['name']
-artifact_version=node['demo']['artifact']['version']
+artifact_name=node['{{artifactId}}']['artifact']['name']
+artifact_version=node['{{artifactId}}']['artifact']['version']
 artifact_path="#{artifact_name}-#{artifact_version}"
-artifact_filename="#{artifact_path}.#{node['demo']['artifact']['extension']}"
+artifact_filename="#{artifact_path}.#{node['{{artifactId}}']['artifact']['extension']}"
 
-base_path="#{node['demo']['app_path']}/#{service_name}"
+base_path="#{node['{{artifactId}}']['app_path']}/#{service_name}"
 
 install_link="#{base_path}/#{service_name}"
 install_path="#{base_path}/#{artifact_path}"
 log_path=base_path
 
 
-if node.attribute?('demo') and node['demo'].attribute?('app')  and node['demo-http-microservice']['app'].attribute?('defines')
-  java_opts = {}.merge(node['demo']['app']['java_opts'])
+if node.attribute?('{{artifactId}}') and node['{{artifactId}}'].attribute?('app')  and node['{{artifactId}}']['app'].attribute?('defines')
+  java_opts = {}.merge(node['{{artifactId}}']['app']['java_opts'])
 else
   java_opts = {}
 end

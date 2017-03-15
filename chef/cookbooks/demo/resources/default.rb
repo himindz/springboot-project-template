@@ -2,8 +2,8 @@ actions :uninstall, :install
 default_action :install
 
 attribute :name, kind_of: String
-attribute :user, kind_of: String, default: 'demo'
-attribute :group, kind_of: String, default: 'demo'
+attribute :user, kind_of: String, default: '{{artifactId}}'
+attribute :group, kind_of: String, default: '{{artifactId}}'
 attribute :port, kind_of: Integer, default: 8080
 attribute :app_remote_path, kind_of: String
 attribute :app_install_path, kind_of: String, default: '/apps'
