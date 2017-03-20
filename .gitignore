@@ -68,3 +68,19 @@ crashlytics-build.properties
 fabric.properties
 
 .idea/
+!.mvn/wrapper/maven-wrapper.jar
+.gradle
+*.sw?
+.#*
+*#
+*~
+.classpath
+.project
+.settings
+.factorypath
+bin
+build
+target
+.springBeans
+tmp*
+grapes
