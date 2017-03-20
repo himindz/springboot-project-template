@@ -2,10 +2,12 @@
 import hudson.model.*
 import hudson.EnvVars
 import java.net.URL
+MAVEN_OPTS="-Xmx2048m -Xms1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
 err = null
 currentVersion = null
 isBuildingPullRequest = false
 
+proceed = false
 def getUser(fie){
     if (fie.causes.size() > 0) {
         def user = fie.causes[0].user
@@ -26,9 +28,9 @@ def getPomInfo(){
 }
 
 def checkOut() {
+    checkout scm
     jenkinsCIYml=readYaml file:"jenkinsci.yml"
     vagrantYml=readYaml file:"vagrant.yml"
-    checkout scm
     def gitUrl = scm.getUserRemoteConfigs()[0].getUrl()
     echo "Git URL :" + gitUrl
     isLocal = true
@@ -63,8 +65,6 @@ def checkOut() {
     return isLocal
 
 }
-
-
 @NonCPS
 def populateEnv(){ binding.variables.each{k,v -> env."$k" = "$v"} }
 def getBranchName(){
@@ -103,7 +103,7 @@ def updateChefCookbookVersion(oldversion, newversion){
     echo artifactVersion
     populateEnv();
     withEnv(["ATTRIBUTESFILE=${attributesFile}"]){
-        sh '''
+        sh( script: '''
             ls -ltr
             set
             sed -i "/$artifactRepo/d" $ATTRIBUTESFILE
@@ -111,56 +111,81 @@ def updateChefCookbookVersion(oldversion, newversion){
             echo $artifactNewRepo >> $ATTRIBUTESFILE
             sed -i "s/$cookbookVersion/$cookbookNewVersion/" $metadataFile
 
-        '''
+        ''', returnStatus:true)
     }
     def lines = readFile(attributesFile)
     echo lines.toString()
 
 }
 def uploadCookbook(){
-    sh '''
+    failed == sh(script: '''
         cd chef/cookbooks
         knife cookbook upload $artifactId
-    '''
+    ''',returnStatus: true) != 0
+    if (failed){
+        currentBuild.result = 'FAILURE'
+    }
 }
 def build(){
     unstash 'source'
-    sh '''
-        export MAVEN_OPTS="-Xmx2048m -Xms1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+    withEnv(["MAVEN_OPTS=${MAVEN_OPTS}"]) {
+        def failed = sh(script: '''
         mvn -q -B -f pom.xml clean compile
-    '''
+    ''', returnStatus: true) != 0;
+
+        if (failed) {
+            currentBuild.result = 'FAILURE'
+        }
+    }
 }
 def unitTests(){
-    sh '''
-      export MAVEN_OPTS="-Xmx2048m -Xms1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1 "
-      mvn -q -f pom.xml verify 
-    '''
-    archive '**/*.jar'
-    step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
+    withEnv(["MAVEN_OPTS=${MAVEN_OPTS}"]) {
+        def failed = sh(script: '''
+          mvn -q -f pom.xml verify 
+          ''', returnStatus: true) != 0;
+        archive '**/*.jar'
+        step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
+        if (failed) {
+            currentBuild.result = 'FAILURE'
+        }
+    }
 }
 def staticAnalysis(){
-    sh '''
+    def failed = sh (script:'''
       mvn -X -B -f pom.xml findbugs:check -Dmaven.findbugs.skip=false
       mvn -q -B -f pom.xml pmd:check -Dmaven.pmd.skip=false
       mvn --quiet -B -f pom.xml checkstyle:check -Dmaven.checkstyle.skip=false
-    '''
+    ''', returnStatus: true) != 0
+
     step([$class: 'PmdPublisher', canComputeNew: false, canRunOnFailed: true, defaultEncoding: '', healthy: '', pattern: '', shouldDetectModules: true, unHealthy: ''])
     step([$class: 'CheckStylePublisher', canComputeNew: false, canRunOnFailed: true, defaultEncoding: '', healthy: '', pattern: '', shouldDetectModules: true, unHealthy: ''])
     step([$class: 'FindBugsPublisher', canComputeNew: false, canRunOnFailed: true, defaultEncoding: '', excludePattern: '', healthy: '', includePattern: '', pattern: '**/findbugsXml.xml', shouldDetectModules: true, unHealthy: ''])
     step([$class: 'AnalysisPublisher', canComputeNew: false, canRunOnFailed: true, defaultEncoding: '', healthy: '', unHealthy: ''])
+    if (failed){
+        currentBuild.result = 'UNSTABLE'
+    }
 }
 def acceptanceTests(currentVersion){
+
     withEnv(["VERSION_IN_POM=${currentVersion}"]){
-        sh '''
+        def failed = sh (script:'''
           chmod +x docker/run.sh
           export DOCKER_API_VERSION=1.22
           export APP_IP=172.17.0.1
           echo $JAVA_HOME
           mvn verify -Pacceptance-tests
-        '''
+        ''', returnStatus: true) != 0
+
+        if (failed){
+            currentBuild.result = 'FAILURE'
+        }
 
     }
-    step([$class: 'CucumberReportPublisher', fileExcludePattern: '', fileIncludePattern: '**/cucumber*.json', ignoreFailedTests: false, jenkinsBasePath: '', jsonReportDirectory: '', missingFails: false, parallelTesting: false, pendingFails: false, skippedFails: false, undefinedFails: false])
+    try {
+        step([$class: 'CucumberReportPublisher', fileExcludePattern: '', fileIncludePattern: '**/cucumber*.json', ignoreFailedTests: false, jenkinsBasePath: '', jsonReportDirectory: '', missingFails: false, parallelTesting: false, pendingFails: false, skippedFails: false, undefinedFails: false])
+    }catch (IllegalStateException e){
+
+    }
 }
 
 
@@ -183,9 +208,10 @@ def release(){
     checkOut()
     nextVersion = getNextVersion();
     def BRANCH_NAME = getBranchName()
+    def failed=false;
     populateEnv()
     withEnv(["VERSTION_TO_RELEASE=${versionNumber}","USER_EMAIL=${jenkinsCIYml.email}","USER_NAME=${jenkinsCIYml.user}"]){
-        sh '''
+        sh (script: '''
             mvn -q versions:set -DnewVersion=$VERSTION_TO_RELEASE -DgenerateBackupPoms=false
             git add pom.xml
             git status
@@ -194,13 +220,13 @@ def release(){
             git commit -a -m "Bumped version number to $VERSTION_TO_RELEASE"
             git status
             git tag -f -a release-$VERSTION_TO_RELEASE -m "Version $VERSTION_TO_RELEASE"
-        '''
+        ''', returnStatus: true) != 0
     }
     withEnv(["VERSION_IN_POM=${versionNumber}"]){
-        sh '''
+        sh (script: '''
             cp /m2/settings*xml /home/jenkins/.m2
             mvn -q  deploy -Dmaven.test.skip=true
-        '''
+        ''',returnStatus: true)
     }
     uploadCookbook()
     pushToGit()
@@ -230,7 +256,7 @@ def ask(question,timevalue, timeunit){
         def user = getUser(fie)
         if ('SYSTEM' == user.toString()) { // SYSTEM means timeout.
             timedOut = true
-            currentBuild.result = "FAILED"
+            currentBuild.result = "ABORTED"
         } else {
             aborted = true
             echo "Aborted by: [${user}]"
@@ -294,7 +320,7 @@ node {
     } finally {
         (currentBuild.result != "ABORTED") && node("master") {
         }
-       if (err) {
+        if (err) {
             throw err
         }
     }
