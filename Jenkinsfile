@@ -4,10 +4,10 @@ import hudson.EnvVars
 import java.net.URL
 MAVEN_OPTS="-Xmx2048m -Xms1024m -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
 err = null
-currentVersion = null
 isBuildingPullRequest = false
-
+isLocal = true
 proceed = false
+
 def getUser(fie){
     if (fie.causes.size() > 0) {
         def user = fie.causes[0].user
@@ -16,13 +16,13 @@ def getUser(fie){
 }
 
 def info(msg){
-    echo "\033[1;33m[Info]    \033[0m ${msg}"
+    echo "\033[1;33m[Info]   \033[1m ${msg}\033[0m"
 }
 def error(msg){
-    echo "\033[1;31m[Error]   \033[0m ${msg}"
+    echo "\033[1;31m[Error]   \033[1m ${msg}\033[0m"
 }
 def success(msg){
-    echo "\033[1;32m[Success] \033[0m ${msg}"
+    echo "\033[1;32m[Success] \033[1m ${msg}\033[0m"
 }
 
 def getPomInfo(){
@@ -33,32 +33,27 @@ def getPomInfo(){
 
 }
 
-def checkOut() {
-    checkout scm
-    unstash 'source'
-    vagrantYml=readYaml file:"vagrant.yml"
+def getSCMRepoInfo() {
     def gitUrl = scm.getUserRemoteConfigs()[0].getUrl()
-    isLocal = true
-    git_branch = scm.getBranches().get(0).getName()
-
-    isBuildingPullRequest = true
+    def url = new URL(gitUrl)
     try {
         info("FROM_BRANCH=${FROM_BRANCH} TO_BRANCH=${TO_BRANCH}")
+        isBuildingPullRequest = true
+
     } catch (groovy.lang.MissingPropertyException e) {
         isBuildingPullRequest = false
     }
-    if (gitUrl.contains("http://") || gitUrl.contains("https://")){
-        isLocal = false
-        def url = new URL(gitUrl)
-        if (url.getPort() >0){
-            repo_url = url.getHost()+":"+url.getPort()+url.getPath()
-        }else{
-            repo_url = url.getHost()+url.getPath()
-        }
-        repo_protocol = url.getProtocol()
+    isLocal = !(gitUrl.contains("http://") || gitUrl.contains("https://") || gitUrl.contains("ssh://"))
+    repo_protocol = url.getProtocol()
+    git_branch = scm.getBranches().get(0).getName()
+}
 
+def checkOut() {
+    info "Checking out code from SCM"
+    if (isLocal){
+        checkout scm
+        return
     }
-
     if (isBuildingPullRequest){
         info("Building Pull Request")
         checkout changelog: true, poll: true,
@@ -67,25 +62,21 @@ def checkOut() {
                       extensions: [[$class: 'PreBuildMerge',
                                     options: [fastForwardMode: 'FF', mergeRemote: 'origin',  mergeTarget: "${TO_BRANCH}"]],
                                    [$class: 'DisableRemotePoll'], [$class: 'WipeWorkspace']], submoduleCfg: [],
-                      userRemoteConfigs: [[credentialsId: 'git-user-credentials', url: "${gitUrl}"]]]
+                      userRemoteConfigs: [[credentialsId: "${jenkinsCIYml.git.credentialsId}", url: "${jenkinsCIYml.git.url}"]]]
         info "Merged ${FROM_BRANCH} with ${TO_BRANCH}"
+        unstash 'source'
+
+
+        return;
     }
+    info "Running CI Pipeline"
+    git url: "${jenkinsCIYml.git.url}" , branch: "${jenkinsCIYml.git.branch}", credentialsId: "${jenkinsCIYml.git.credentialsId}"
+    def url = new URL(jenkinsCIYml.git.url)
+    repo_url = url.getPort() > 0 ? url.getHost() + ":" + url.getPort() + url.getPath() : url.getHost() + url.getPath()
+    vagrantYml=readYaml file:"vagrant.yml"
+    unstash 'source'
 
-    if (!isLocal && !isBuildingPullRequest){
-        info "Running CI Pipeline"
-        try {
-            jenkinsCIYml=readYaml file:"./jenkinsci/jenkinsci.yml"
-            sh 'cat ./jenkinsci/jenkinsci.yml'
-            info "URL : "+ jenkinsCIYml.nexus.url
 
-        }catch(err){
-            info "No Jenkins CI configuration found in ./jenkinsci/jenkinsci.yml"
-            currentBuild.result = "FAILURE"
-            throw err
-        }
-
-    }
-    return isLocal
 
 }
 @NonCPS
@@ -102,10 +93,8 @@ def extractCurrentVersion(forRelease){
 def getNextVersion(){
     def version = "<version>"+mavenVersion+"</version>"
     def matcher = version =~ '<version>(\\d*)\\.(\\d*)\\.(\\d*)(-SNAPSHOT)*</version>'
-    info matcher[0].toString()
     if (matcher[0]){
         def original = matcher[0]
-        info original[3]
         def major = original[1];
         def minor = original[2];
         def patch  = Integer.parseInt(original[3]) + 1;
@@ -122,37 +111,34 @@ def updateChefCookbookVersion(oldversion, newversion){
     artifactVersion= "default\\['"+artifactId+"'\\]\\['artifact'\\]\\['version'\\] = \""+newversion+"\""
     oldArtifactVersion= "default\\['"+artifactId+"'\\]\\['artifact'\\]\\['version'\\] = \""+oldversion+"\""
     artifactRepo = "default\\['"+artifactId+"'\\]\\['repo'\\]"
-    artifactNewRepo = "default['"+artifactId+"']['repo']='"+${jenkinsCIYml.nexus.url}+"/"+groupId+"/'"
-    info artifactVersion
+    artifactNewRepo = "default['"+artifactId+"']['repo']='${jenkinsCIYml.nexus.url}/"+groupId.replaceAll("\\.","/")+"/'"
     populateEnv();
     withEnv(["ATTRIBUTESFILE=${attributesFile}"]){
         sh( script: '''
-            set
             sed -i "/$artifactRepo/d" $ATTRIBUTESFILE
             sed -i "s/$oldArtifactVersion/$artifactVersion/" $ATTRIBUTESFILE
-            info $artifactNewRepo >> $ATTRIBUTESFILE
+            echo $artifactNewRepo >> $ATTRIBUTESFILE
             sed -i "s/$cookbookVersion/$cookbookNewVersion/" $metadataFile
-
         ''', returnStatus:true)
     }
-    def lines = readFile(attributesFile)
-    info lines.toString()
 
 }
 def uploadCookbook(){
-    failed = sh(script: '''
-        set
-        cd chef/cookbooks
-        knife cookbook upload $artifactId
+    info "uploading cookbook "
+    failed = sh(script: '''       
+        cd chef/cookbooks/$artifactId
+        berks install
+        berks upload --ssl-verify=false
     ''',returnStatus: true) != 0
     if (failed){
         currentBuild.result = 'FAILURE'
     }
 }
 def build(){
+    info "Building with 'clean compile'"
     withEnv(["MAVEN_OPTS=${MAVEN_OPTS}"]) {
         def failed = sh(script: '''
-        mvn -q -B -f pom.xml clean compile
+        mvn -q -B -f pom.xml clean compile -Dmaven.test.skip=true
         ''', returnStatus: true) != 0;
 
         if (failed) {
@@ -196,7 +182,6 @@ def acceptanceTests(currentVersion){
           chmod +x docker/run.sh
           export DOCKER_API_VERSION=1.22
           export APP_IP=172.17.0.1
-          info $JAVA_HOME
           mvn verify -Pacceptance-tests
         ''', returnStatus: true) != 0
 
@@ -215,12 +200,12 @@ def acceptanceTests(currentVersion){
 
 
 def pushToGit(){
-    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'jenkins_ci_push_credential', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD']]) {
-        sh('git push --force ${repo_protocol}://${GIT_USERNAME}:${GIT_PASSWORD}@${repo_url}  ')
+    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'git-user-credentials', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD']]) {
+        sh('git push --force ${repo_protocol}://${GIT_USERNAME}:${GIT_PASSWORD}@${repo_url} ')
     }
 }
 def pushTagsToGit(){
-    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'jenkins_ci_push_credential', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD']]) {
+    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'git-user-credentials', usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_PASSWORD']]) {
         sh('git push --force ${repo_protocol}://${GIT_USERNAME}:${GIT_PASSWORD}@${repo_url}  --tags')
     }
 }
@@ -233,13 +218,9 @@ def release(){
     def BRANCH_NAME = getBranchName()
     def failed=false;
     populateEnv()
-    error("${jenkinsCIYml.nexus.url}")
     withEnv(["NEXUS_URL=${jenkinsCIYml.nexus.url}","VERSTION_TO_RELEASE=${versionNumber}","USER_EMAIL=${jenkinsCIYml.user.email}",
              "USER_NAME=${jenkinsCIYml.user.fullname}","REPO_ID=${jenkinsCIYml.nexus.repo_id}"]){
         sh (script: '''
-            echo $REPO_ID
-            echo "Nexus URL: $NEXUS_URL"
-            echo "deploy -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true"
             mvn -q versions:set -DnewVersion=$VERSTION_TO_RELEASE -DgenerateBackupPoms=false
             git add pom.xml
             git status
@@ -248,7 +229,7 @@ def release(){
             git commit -a -m "Bumped version number to $VERSTION_TO_RELEASE"
             git status
             git tag -f -a release-$VERSTION_TO_RELEASE -m "Version $VERSTION_TO_RELEASE"
-            mvn  -q deploy --global-settings ./jenkinsci/settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
+            mvn  -q deploy --global-settings ./projects/${PROJECT_NAME}/${REPO_NAME}/m2_settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
         ''', returnStatus: true) != 0
     }
 
@@ -276,14 +257,13 @@ def ask(question,timevalue, timeunit){
             userInput = input(id: 'Proceed1', message: question, parameters: [])
         }
     } catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException fie) {
-        // timeout reached or input false
         def user = getUser(fie)
         if ('SYSTEM' == user.toString()) { // SYSTEM means timeout.
             timedOut = true
             currentBuild.result = "ABORTED"
         } else {
             aborted = true
-            info "Aborted by: [${user}]"
+            error "Aborted by: [${user}]"
             currentBuild.result = "ABORTED"
         }
 
@@ -299,8 +279,25 @@ node {
         wrap([$class: 'AnsiColorBuildWrapper']) {
             try {
                 node("master"){
-                    sh 'cp -R /var/jenkins_home/jenkinsci ./jenkinsci'
-                    stash excludes: '**/target', includes: '**', name: 'source'
+                    getSCMRepoInfo()
+                    if (!isLocal){
+                        checkout scm
+                        def files = findFiles(glob: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml")
+                        if (files.size() >0) {
+                            try {
+                                jenkinsCIYml = readYaml file: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
+                                stash excludes: '**/target', includes: '**', name: 'source'
+
+                            } catch (err) {
+                                error "No Jenkins CI configuration found in ./projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
+                                currentBuild.result = "FAILURE"
+                                throw err
+                            }
+                        }else{
+                            sh "mkdir ./projects/${PROJECT_NAME}/${REPO_NAME} && cp -R /var/jenkins_home/jenkinsci/* ./projects/${PROJECT_NAME}/${REPO_NAME}/."
+                            stash excludes: '**/target', includes: '**', name: 'source'
+                        }
+                    }
 
                 }
                 node("jenkins-slave") {
@@ -316,7 +313,7 @@ node {
                     getPomInfo()
                     versionNumber = extractCurrentVersion(false)
                     //acceptanceTests(versionNumber)
-                    if (!isBuildingPullRequest) {
+                    if (!(isLocal || isBuildingPullRequest)) {
                         stage '\u277B Release'
                         versionNumber = extractCurrentVersion(true)
                         proceed = ask('Release version ' + versionNumber + ' to nexus repository?', 1, "HOURS")
