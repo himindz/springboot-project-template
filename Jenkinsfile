@@ -281,6 +281,7 @@ node {
                 node("master"){
                     getSCMRepoInfo()
                     if (!isLocal){
+                        error "checking out"
                         checkout scm
                         def files = findFiles(glob: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml")
                         if (files.size() >0) {
