@@ -69,12 +69,13 @@ def checkOut() {
 
         return;
     }
+
     info "Running CI Pipeline"
     git url: "${jenkinsCIYml.git.url}" , branch: "${jenkinsCIYml.git.branch}", credentialsId: "${jenkinsCIYml.git.credentialsId}"
     def url = new URL(jenkinsCIYml.git.url)
     repo_url = url.getPort() > 0 ? url.getHost() + ":" + url.getPort() + url.getPath() : url.getHost() + url.getPath()
-    vagrantYml=readYaml file:"vagrant.yml"
     unstash 'source'
+    sh 'ls -ltr'
 
 
 
@@ -249,6 +250,14 @@ def verifyCookbook(){
     info "Verifying Cookbook"
 
 }
+def isCIOverlayAvailable(){
+    try {
+        findFiles(glob: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml")
+        return true
+    }catch(groovy.lang.MissingPropertyException e){
+        return false
+    }
+}
 def ask(question,timevalue, timeunit){
     def timedOut = false
     def aborted = false
@@ -281,13 +290,12 @@ node {
                 node("master"){
                     getSCMRepoInfo()
                     if (!isLocal){
-                        error "checking out"
                         checkout scm
-                        def files = findFiles(glob: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml")
-                        if (files.size() >0) {
+
+                        if (isCIOverlayAvailable()) {
                             try {
                                 jenkinsCIYml = readYaml file: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
-                                stash excludes: '**/target', includes: './projects', name: 'source'
+                                stash excludes: '**/target', includes: '**', name: 'source'
 
                             } catch (err) {
                                 error "No Jenkins CI configuration found in ./projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
@@ -295,9 +303,15 @@ node {
                                 throw err
                             }
                         }else{
-                            sh "mkdir ./projects/${PROJECT_NAME}/${REPO_NAME} && cp -R /var/jenkins_home/jenkinsci/* ./projects/${PROJECT_NAME}/${REPO_NAME}/."
-                            sh 'ls -ltR'
-                            stash excludes: '**/target', includes: './projects', name: 'source'
+                            vagrantYml = readYaml file: "vagrant.yml"
+                            PROJECT_NAME=vagrantYml.microservice.name
+                            REPO_NAME=vagrantYml.microservice.name
+                            sh "mkdir -p ./projects/${PROJECT_NAME}/${REPO_NAME} && cp -R /var/jenkins_home/jenkinsci/* ./projects/${PROJECT_NAME}/${REPO_NAME}/."
+                            jenkinsCIYml = readYaml file: "./projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
+                            jenkinsCIYml.git = [url:scm.getUserRemoteConfigs()[0].getUrl(),
+                                                branch: scm.getBranches().get(0).getName().replaceAll("\\*/",""),
+                                                credentialsId: scm.getUserRemoteConfigs()[0].getCredentialsId()]
+                            stash excludes: '**/target', includes: '**/projects/**', name: 'source'
                         }
                     }
 
