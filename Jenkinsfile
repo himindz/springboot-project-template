@@ -287,7 +287,7 @@ node {
                         if (files.size() >0) {
                             try {
                                 jenkinsCIYml = readYaml file: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
-                                stash excludes: '**/target', includes: '**', name: 'source'
+                                stash excludes: '**/target', includes: './projects', name: 'source'
 
                             } catch (err) {
                                 error "No Jenkins CI configuration found in ./projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
@@ -296,7 +296,8 @@ node {
                             }
                         }else{
                             sh "mkdir ./projects/${PROJECT_NAME}/${REPO_NAME} && cp -R /var/jenkins_home/jenkinsci/* ./projects/${PROJECT_NAME}/${REPO_NAME}/."
-                            stash excludes: '**/target', includes: '**', name: 'source'
+                            sh 'ls -ltR'
+                            stash excludes: '**/target', includes: './projects', name: 'source'
                         }
                     }
 
