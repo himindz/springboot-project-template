@@ -263,7 +263,7 @@ def release(){
             git commit -a -m "Bumped version number to $VERSTION_TO_RELEASE"
             git status
             git tag -f -a release-$VERSTION_TO_RELEASE -m "Version $VERSTION_TO_RELEASE"
-            mvn  -q deploy --global-settings ./projects/${PROJECT_NAME}/${REPO_NAME}/m2_settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
+            mvn  -q package spring-boot:repackage deploy --global-settings ./projects/${PROJECT_NAME}/${REPO_NAME}/m2_settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
         ''', returnStatus: true) != 0
     }
 
