@@ -35,17 +35,20 @@ def getPomInfo(){
 
 def getSCMRepoInfo() {
     def gitUrl = scm.getUserRemoteConfigs()[0].getUrl()
-    def url = new URL(gitUrl)
-    try {
-        info("FROM_BRANCH=${FROM_BRANCH} TO_BRANCH=${TO_BRANCH}")
-        isBuildingPullRequest = true
-
-    } catch (groovy.lang.MissingPropertyException e) {
-        isBuildingPullRequest = false
-    }
-    isLocal = !(gitUrl.contains("http://") || gitUrl.contains("https://") || gitUrl.contains("ssh://"))
-    repo_protocol = url.getProtocol()
     git_branch = scm.getBranches().get(0).getName()
+    isBuildingPullRequest = false
+    isLocal = !(gitUrl.contains("http://") || gitUrl.contains("https://") || gitUrl.contains("ssh://"))
+    if (!isLocal) {
+        def url = new URL(gitUrl)
+        try {
+            info("FROM_BRANCH=${FROM_BRANCH} TO_BRANCH=${TO_BRANCH}")
+            isBuildingPullRequest = true
+
+        } catch (groovy.lang.MissingPropertyException e) {
+            isBuildingPullRequest = false
+        }
+        repo_protocol = url.getProtocol()
+    }
 }
 
 def checkOut() {
