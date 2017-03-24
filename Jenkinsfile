@@ -65,6 +65,7 @@ def checkOut() {
                       userRemoteConfigs: [[credentialsId: "${jenkinsCIYml.git.credentialsId}", url: "${jenkinsCIYml.git.url}"]]]
         info "Merged ${FROM_BRANCH} with ${TO_BRANCH}"
         unstash 'source'
+        vagrantYml = readYaml file: "vagrant.yml"
 
 
         return;
@@ -72,10 +73,10 @@ def checkOut() {
 
     info "Running CI Pipeline"
     git url: "${jenkinsCIYml.git.url}" , branch: "${jenkinsCIYml.git.branch}", credentialsId: "${jenkinsCIYml.git.credentialsId}"
+    vagrantYml = readYaml file: "vagrant.yml"
     def url = new URL(jenkinsCIYml.git.url)
     repo_url = url.getPort() > 0 ? url.getHost() + ":" + url.getPort() + url.getPath() : url.getHost() + url.getPath()
     unstash 'source'
-    sh 'ls -ltr'
 
 
 
@@ -211,8 +212,40 @@ def pushTagsToGit(){
     }
 }
 
-def deploy(){
-    info "Deploying on Test via Chef"
+def deploy(deploy_targets){
+    for (i=0;i<deploy_targets.size();i++){
+        info "Deploying on ${deploy_targets[i].host} via Chef Push Job"
+        withEnv(["NODE_NAME=${deploy_targets[i].name}","NODE_IP=${deploy_targets[i].ip}","NODE_PORT=${deploy_targets[i].ssh_port}",
+                 "SSH_USER=${deploy_targets[i].user}","SSH_PASSWORD=${deploy_targets[i].password}"]){
+            sh (script: '''
+                set +e
+                if [ ! -d $HOME/.chef/trusted_certs ]; then
+                    knife ssl-fetch
+                fi
+                sudo sshpass -p "$SSH_PASSWORD" ssh -p $NODE_PORT -oConnectTimeout=30 -oStrictHostKeyChecking=no $SSH_USER@$NODE_IP "mkdir -p /tmp/trusted_certs"
+                sudo sshpass -p "$SSH_PASSWORD" scp -o ConnectTimeout=30 -P $NODE_PORT  -oStrictHostKeyChecking=no -r $HOME/.chef/trusted_certs/* $SSH_USER@$NODE_IP:/tmp/trusted_certs/.
+                sudo sshpass -p "$SSH_PASSWORD" ssh -p $NODE_PORT  -o ConnectTimeout=30 -oStrictHostKeyChecking=no $SSH_USER@$NODE_IP "sudo mv /tmp/trusted_certs /etc/chef/."
+                    
+                knife cookbook show push-jobs
+                rc=$?
+                if [ $rc -ne 0 ]; then
+                   $HOME/install-push-jobs.sh
+                fi
+                knife node show $NODE_NAME
+                rc=$?
+                if [ $rc -ne 0 ]; then
+                   knife bootstrap $NODE_IP --node-ssl-verify-mode none --ssh-port $NODE_PORT --ssh-password $SSH_PASSWORD --sudo --ssh-user $SSH_USER --node-name $NODE_NAME --run-list push-jobs
+                   rc=$? 
+                fi
+                if [ $rc -eq 0 ]; then
+                  knife node run_list add $NODE_NAME $artifactId
+                  knife job start chef-client $NODE_NAME
+                fi            
+        ''', returnStatus: true) != 0
+
+        }
+
+    }
 }
 def release(){
     nextVersion = getNextVersion();
@@ -230,7 +263,7 @@ def release(){
             git commit -a -m "Bumped version number to $VERSTION_TO_RELEASE"
             git status
             git tag -f -a release-$VERSTION_TO_RELEASE -m "Version $VERSTION_TO_RELEASE"
-            mvn  -q package spring-boot:repackage deploy --global-settings ./projects/${PROJECT_NAME}/${REPO_NAME}/m2_settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
+            mvn  -q deploy --global-settings ./projects/${PROJECT_NAME}/${REPO_NAME}/m2_settings.xml -DaltReleaseDeploymentRepository=$REPO_ID::default::$NEXUS_URL -Dmaven.test.skip=true
         ''', returnStatus: true) != 0
     }
 
@@ -256,6 +289,15 @@ def isCIOverlayAvailable(){
         return true
     }catch(groovy.lang.MissingPropertyException e){
         return false
+    }
+}
+def getDeployTargets(){
+    try{
+        serviceMap = readYaml file: "projects/${PROJECT_NAME}/${REPO_NAME}/service_map.yml"
+        return serviceMap[vagrantYml.microservice.name].environments.sit
+
+    }catch (e){
+
     }
 }
 def ask(question,timevalue, timeunit){
@@ -335,10 +377,15 @@ node {
                         proceed = ask('Release version ' + versionNumber + ' to nexus repository?', 1, "HOURS")
                         if (proceed) {
                             release()
-                            stage '\u277D Deploy on Test'
-                            def proceed_deploy = ask('Do you want to deploy version ' + versionNumber + ' to Test?', 1, "MINUTES")
+                            stage '\u277D Deploy on System Test'
+                            def deploy_targets = getDeployTargets()
+                            def targets=""
+                            for (i=0;i<deploy_targets.size();i++){
+                                targets += deploy_targets[i].name+"  "
+                            }
+                            def proceed_deploy = ask('Do you want to deploy version ' + versionNumber + " to ${targets}?", 10, "MINUTES")
                             if (proceed_deploy) {
-                                deploy()
+                                deploy(deploy_targets)
                             }
                         }
 
