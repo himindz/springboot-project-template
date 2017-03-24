@@ -336,7 +336,6 @@ node {
                     getSCMRepoInfo()
                     if (!isLocal){
                         checkout scm
-
                         if (isCIOverlayAvailable()) {
                             try {
                                 jenkinsCIYml = readYaml file: "projects/${PROJECT_NAME}/${REPO_NAME}/jenkinsci.yml"
@@ -363,7 +362,7 @@ node {
                 }
                 node("jenkins-slave") {
                     stage "\u2776 Checkout"
-                    isLocal = checkOut()
+                    checkOut()
                     stage "\u2777 Build"
                     build()
                     stage '\u2778 Unit/Integration Tests'
@@ -374,6 +373,7 @@ node {
                     getPomInfo()
                     versionNumber = extractCurrentVersion(false)
                     //acceptanceTests(versionNumber)
+                    error "isLocal= ${isLocal} buildingPR=${isBuildingPullRequest}"
                     if (!(isLocal || isBuildingPullRequest)) {
                         stage '\u277B Release'
                         versionNumber = extractCurrentVersion(true)
