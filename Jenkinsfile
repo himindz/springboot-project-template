@@ -381,7 +381,7 @@ node {
                         if (proceed) {
                             release()
                             def deploy_targets = getDeployTargets()
-                            if (deply_targests != null) {
+                            if (deploy_targests != null) {
                                 stage '\u277D Deploy on System Test'
                                 def targets = ""
                                 for (i = 0; i < deploy_targets.size(); i++) {
