@@ -380,15 +380,17 @@ node {
                         proceed = ask('Release version ' + versionNumber + ' to nexus repository?', 1, "HOURS")
                         if (proceed) {
                             release()
-                            stage '\u277D Deploy on System Test'
                             def deploy_targets = getDeployTargets()
-                            def targets=""
-                            for (i=0;i<deploy_targets.size();i++){
-                                targets += deploy_targets[i].name+"  "
-                            }
-                            def proceed_deploy = ask('Do you want to deploy version ' + versionNumber + " to ${targets}?", 10, "MINUTES")
-                            if (proceed_deploy) {
-                                deploy(deploy_targets)
+                            if (deply_targests != null) {
+                                stage '\u277D Deploy on System Test'
+                                def targets = ""
+                                for (i = 0; i < deploy_targets.size(); i++) {
+                                    targets += deploy_targets[i].name + "  "
+                                }
+                                def proceed_deploy = ask('Do you want to deploy version ' + versionNumber + " to ${targets}?", 10, "MINUTES")
+                                if (proceed_deploy) {
+                                    deploy(deploy_targets)
+                                }
                             }
                         }
 
