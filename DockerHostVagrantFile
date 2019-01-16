@@ -1,16 +1,14 @@
-#!/usr/bin/env ruby
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 require 'yaml'
 require 'rbconfig'
 require 'io/console'
-
 settings = YAML.load_file 'vagrant.yml'
+
 dr_server = settings['docker']['server']
 dr_port = settings['docker']['port']
 dr_user = settings['docker']['user']
 dr_password= settings['docker']['password']
-
 
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/trusty64"
@@ -18,7 +16,7 @@ Vagrant.configure("2") do |config|
 
   config.vm.provider :virtualbox do |vb|
     vb.name = settings['microservice']['name']
-    vb.memory = "2048"
+    vb.memory = "3072"
     vb.customize ["modifyvm", :id, "--cpus", "2"]
     vb.customize ["modifyvm", :id, "--graphicscontroller", "vboxvga"]
     vb.customize ["modifyvm", :id, "--accelerate3d", "on"]

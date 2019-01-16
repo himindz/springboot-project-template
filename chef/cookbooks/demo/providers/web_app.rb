@@ -1,14 +1,13 @@
 use_inline_resources
 
 action :install do
-  ENV['SSL_CERT_FILE'] = '/etc/ssl/certs/ca-certificates.crt'
 
-  if new_resource.app_remote_path.to_s.empty?
-    Chef::Application.fatal!('app_remote_path may not be empty', 1)
+  if new_resource.jar_remote_path.to_s.empty?
+    Chef::Application.fatal!('jar_remote_path may not be empty', 1)
   end
 
   jar_directory = "/#{new_resource.app_install_path}/#{new_resource.name}"
-  jar_path = jar_directory + "/#{new_resource.name}#{new_resource.app_extension}"
+  jar_path = jar_directory + '/{new_resource.name}#{new_resource.app_extension}'
   logging_directory = jar_directory + '/logs'
 
   user new_resource.user
@@ -35,7 +34,7 @@ action :install do
   end
 
   bootapp_remote_file = remote_file jar_path do
-    source new_resource.app_remote_path
+    source new_resource.jar_remote_path
     owner new_resource.user
     group new_resource.group
     mode '0500'
@@ -96,7 +95,7 @@ def install_initd(new_resource, jar_directory, jar_path, logging_directory, boot
     mode '0400'
     owner 'root'
     group 'root'
-    cookbook '{{artifactId}}'
+    cookbook 'spring-boot'
     variables(
         jar_path: jar_path,
         java_opts: new_resource.java_opts,
@@ -106,13 +105,8 @@ def install_initd(new_resource, jar_directory, jar_path, logging_directory, boot
     )
   end
 
-
-
   link "/etc/init.d/#{new_resource.name}" do
     to jar_path
-  end
-  execute "Verify" do
-    command "cat #{jar_directory}/#{new_resource.name}.conf; ls -l /etc/init.d/#{new_resource.name}"
   end
 
   service new_resource.name do
@@ -131,7 +125,7 @@ def install_systemd(new_resource, jar_path, logging_directory, bootapp_remote_fi
     mode '0664'
     owner 'root'
     group 'root'
-    cookbook '{{artifactId}}'
+    cookbook 'spring-boot'
     variables(
         description: new_resource.name,
         user: new_resource.user,

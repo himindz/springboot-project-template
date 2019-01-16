@@ -48,6 +48,7 @@ def getSCMRepoInfo() {
             isBuildingPullRequest = false
         }
         repo_protocol = url.getProtocol()
+        repo_host_url= url.getProtocol()+"://"+url.getAuthority()
     }
 }
 
@@ -69,13 +70,16 @@ def checkOut() {
         info "Merged ${FROM_BRANCH} with ${TO_BRANCH}"
         unstash 'source'
         vagrantYml = readYaml file: "vagrant.yml"
-
+        this.notifyStash("INPROGRESS")
 
         return;
     }
 
     info "Running CI Pipeline"
     git url: "${jenkinsCIYml.git.url}" , branch: "${jenkinsCIYml.git.branch}", credentialsId: "${jenkinsCIYml.git.credentialsId}"
+    sh "git rev-parse HEAD > .git/commit-id"
+    FROM_HASH = readFile('.git/commit-id').trim()
+    error "FROM_HASH=${FROM_HASH}"
     vagrantYml = readYaml file: "vagrant.yml"
     def url = new URL(jenkinsCIYml.git.url)
     repo_url = url.getPort() > 0 ? url.getHost() + ":" + url.getPort() + url.getPath() : url.getHost() + url.getPath()
@@ -130,7 +134,7 @@ def updateChefCookbookVersion(oldversion, newversion){
 }
 def uploadCookbook(){
     info "uploading cookbook "
-    failed = sh(script: '''       
+    failed = sh(script: '''
         cd chef/cookbooks/$artifactId
         berks install
         berks upload --ssl-verify=false
@@ -154,7 +158,7 @@ def build(){
 def unitTests(){
     withEnv(["MAVEN_OPTS=${MAVEN_OPTS}"]) {
         def failed = sh(script: '''
-          mvn -q -f pom.xml verify 
+          mvn -q -f pom.xml verify
           ''', returnStatus: true) != 0;
         archive '**/*.jar'
         step([$class: 'JUnitResultArchiver', testResults: '**/target/surefire-reports/TEST-*.xml'])
@@ -228,7 +232,7 @@ def deploy(deploy_targets){
                 sudo sshpass -p "$SSH_PASSWORD" ssh -p $NODE_PORT -oConnectTimeout=30 -oStrictHostKeyChecking=no $SSH_USER@$NODE_IP "mkdir -p /tmp/trusted_certs"
                 sudo sshpass -p "$SSH_PASSWORD" scp -o ConnectTimeout=30 -P $NODE_PORT  -oStrictHostKeyChecking=no -r $HOME/.chef/trusted_certs/* $SSH_USER@$NODE_IP:/tmp/trusted_certs/.
                 sudo sshpass -p "$SSH_PASSWORD" ssh -p $NODE_PORT  -o ConnectTimeout=30 -oStrictHostKeyChecking=no $SSH_USER@$NODE_IP "sudo mv /tmp/trusted_certs /etc/chef/."
-                    
+
                 knife cookbook show push-jobs
                 rc=$?
                 if [ $rc -ne 0 ]; then
@@ -238,12 +242,12 @@ def deploy(deploy_targets){
                 rc=$?
                 if [ $rc -ne 0 ]; then
                    knife bootstrap $NODE_IP --node-ssl-verify-mode none --ssh-port $NODE_PORT --ssh-password $SSH_PASSWORD --sudo --ssh-user $SSH_USER --node-name $NODE_NAME --run-list push-jobs
-                   rc=$? 
+                   rc=$?
                 fi
                 if [ $rc -eq 0 ]; then
                   knife node run_list add $NODE_NAME $artifactId
                   knife job start chef-client $NODE_NAME
-                fi            
+                fi
         ''', returnStatus: true) != 0
 
         }
@@ -328,6 +332,24 @@ def ask(question,timevalue, timeunit){
     }
     return true;
 }
+
+def notifyStash(String state) {
+    populateEnv();
+    sh "set"
+    if('SUCCESS' == state || 'FAILED' == state) {
+        currentBuild.result = state         // Set result of currentBuild !Important!
+    }
+    step([$class: 'StashNotifier',
+          commitSha1: "${FROM_HASH}",
+          credentialsId: 'git-user-credentials',
+          disableInprogressNotification: false,
+          ignoreUnverifiedSSLPeer: true,
+          includeBuildNumberInKey: false,
+          prependParentProjectKey: false,
+          projectKey: '',
+          stashServerBaseUrl: "${repo_host_url}"])
+
+}
 node {
     try {
         wrap([$class: 'AnsiColorBuildWrapper']) {
@@ -373,7 +395,6 @@ node {
                     getPomInfo()
                     versionNumber = extractCurrentVersion(false)
                     //acceptanceTests(versionNumber)
-                    error "isLocal= ${isLocal} buildingPR=${isBuildingPullRequest}"
                     if (!(isLocal || isBuildingPullRequest)) {
                         stage '\u277B Release'
                         versionNumber = extractCurrentVersion(true)
@@ -381,7 +402,7 @@ node {
                         if (proceed) {
                             release()
                             def deploy_targets = getDeployTargets()
-                            if (deploy_targests != null) {
+                            if (deploy_targets != null && deploy_targets.size() > 0) {
                                 stage '\u277D Deploy on System Test'
                                 def targets = ""
                                 for (i = 0; i < deploy_targets.size(); i++) {
@@ -395,6 +416,9 @@ node {
                         }
 
                     }
+                    this.notifyStash('SUCCESS')
+
+
                 }
 
             } catch (caughtError) {
@@ -403,9 +427,12 @@ node {
             }
         }
     } finally {
-        (currentBuild.result != "ABORTED") && node("master") {
-        }
+
         if (err) {
+            if (isBuildingPullRequest){
+                this.notifyStash('FAILED')
+            }
+
             throw err
         }
     }
