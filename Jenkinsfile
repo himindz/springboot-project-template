@@ -388,13 +388,13 @@ node {
                     stage "\u2777 Build"
                     build()
                     stage '\u2778 Unit/Integration Tests'
-                    //unitTests()
+                    unitTests()
                     stage '\u2779 Static Analysis'
-                    //staticAnalysis()
+                    staticAnalysis()
                     stage '\u277A Acceptance Tests'
                     getPomInfo()
                     versionNumber = extractCurrentVersion(false)
-                    //acceptanceTests(versionNumber)
+                    acceptanceTests(versionNumber)
                     if (!(isLocal || isBuildingPullRequest)) {
                         stage '\u277B Release'
                         versionNumber = extractCurrentVersion(true)
