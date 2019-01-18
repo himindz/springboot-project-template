@@ -339,7 +339,7 @@ def notifyStash(String state) {
     if('SUCCESS' == state || 'FAILED' == state) {
         currentBuild.result = state         // Set result of currentBuild !Important!
     }
-    step([$class: 'StashNotifier',
+    /*step([$class: 'StashNotifier',
           commitSha1: "${FROM_HASH}",
           credentialsId: 'git-user-credentials',
           disableInprogressNotification: false,
@@ -347,7 +347,7 @@ def notifyStash(String state) {
           includeBuildNumberInKey: false,
           prependParentProjectKey: false,
           projectKey: '',
-          stashServerBaseUrl: "${repo_host_url}"])
+          stashServerBaseUrl: "${repo_host_url}"])*/
 
 }
 node {
