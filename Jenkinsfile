@@ -414,9 +414,11 @@ node {
                                 }
                             }
                         }
+                    }
+                    if (!isLocal){
+                        this.notifyStash('SUCCESS')
 
                     }
-                    this.notifyStash('SUCCESS')
 
 
                 }
